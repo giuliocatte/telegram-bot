@@ -11,7 +11,6 @@ from google.adk.artifacts.in_memory_artifact_service import InMemoryArtifactServ
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset as MCPToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 from mcp import StdioServerParameters
-
 # Load environment variables from .env file in the parent directory
 # Place this near the top, before using env vars like API keys
 load_dotenv('../.env')

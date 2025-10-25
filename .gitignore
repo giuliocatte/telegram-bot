@@ -1,2 +1,4 @@
-root_agent/.env
+.env
 config.py
+__pycache__
+*.pyc

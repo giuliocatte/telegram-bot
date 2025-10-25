@@ -11,15 +11,10 @@ import requests
 from requests import RequestException, Timeout
 
 
-try:
-    from config import CONFIG as f
-except ImportError:
-    api_keys = defaultdict(str, **f)
-except ImportError:
-    api_keys = defaultdict(str)
+from config import CONFIG as f
 
-TELEGRAM_APIKEY = api_keys['TELEGRAM_API_KEY']
-TELEGRAM_CHAT_IDS = api_keys['TELEGRAM_CHAT_IDS'] or []
+TELEGRAM_APIKEY = f['TELEGRAM_API_KEY']
+TELEGRAM_CHAT_IDS = f.get('TELEGRAM_CHAT_IDS', [])
 TELEGRAM_ENDPOINT = "https://api.telegram.org/bot"
 
 logger = logging.getLogger('TELEGRAM')
@@ -71,7 +66,7 @@ class Api(object):
         return resp.json()
 
 
-class TelegramBot(logging.Handler):
+class TelegramLogHandler(logging.Handler):
 
     def __init__(self, logger_mask, level=logging.NOTSET, disable_notification: Optional[Mapping] = None):
         '''
@@ -137,3 +132,29 @@ class TelegramBot(logging.Handler):
                                            disable_notification=not notification
                     )
             time.sleep(5)
+
+
+class TelegramRunner(object):
+
+    def __init__(self, chat_id):
+        self.api = Api()
+        self.chat_id = chat_id
+        self.inbound_queue = Queue()
+        Thread(daemon=True, target=self.api.get_updates, args=(self.receive_message,)).start()
+
+    def send_message(self, text):
+        self.api.call_telegram('sendMessage', chat_id=self.chat_id, text=text)
+
+    def receive_message(self, chat_id, text):
+        self.inbound_queue.put_nowait(text)
+
+    def get_messages(self):
+        sentinel = object()
+        while True:
+            self.log_queue.put(sentinel)
+            messages = []
+            for el in iter(self.log_queue.get_nowait, sentinel):
+                messages.append(el)
+            if messages:
+                yield '\n'.join(messages)
+            sleep(1)
