@@ -1,4 +1,4 @@
-# Python UV Starter
+# Telegram AI Agent
 
 AI agent with a Telegram Bot as interface.
 Uses gemini flash 2.5 as llm, and right now it has just a toolset of D&D 5e knowledge, via a MCP server (the project mounted as a submodule).
