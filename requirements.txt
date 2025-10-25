@@ -1,1 +1,5 @@
-python-telegram-bot
+python-dotenv
+google-adk
+mcp
+requests
+google-genai
