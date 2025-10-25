@@ -136,25 +136,34 @@ class TelegramLogHandler(logging.Handler):
 
 class TelegramRunner(object):
 
-    def __init__(self, chat_id):
+    def __init__(self, chat_ids):
         self.api = Api()
-        self.chat_id = chat_id
-        self.inbound_queue = Queue()
+        self.chat_ids = chat_ids
+        self.inbound_queue = {c:Queue() for c in chat_ids}
         Thread(daemon=True, target=self.api.get_updates, args=(self.receive_message,)).start()
 
-    def send_message(self, text):
-        self.api.call_telegram('sendMessage', chat_id=self.chat_id, text=text)
+    def send_message(self, chat_id, text):
+        self.api.call_telegram('sendMessage', chat_id=chat_id, text=text)
 
     def receive_message(self, chat_id, text):
-        self.inbound_queue.put_nowait(text)
+        self.inbound_queue[chat_id].put_nowait(text)
 
     def get_messages(self):
         sentinel = object()
         while True:
-            self.log_queue.put(sentinel)
-            messages = []
-            for el in iter(self.log_queue.get_nowait, sentinel):
-                messages.append(el)
-            if messages:
-                yield '\n'.join(messages)
-            sleep(1)
+            for chat_id in self.chat_ids:
+                self.inbound_queue[chat_id].put(sentinel)
+                messages = []
+                for el in iter(self.inbound_queue[chat_id].get_nowait, sentinel):
+                    messages.append(el)
+                if messages:
+                    yield (chat_id, '\n'.join(messages))
+            time.sleep(1)
+
+    def connect(self):
+        for c in self.chat_ids:
+            self.send_message(c, 'ehilà, mi sono connesso!')
+
+    def disconnect(self):
+        for c in self.chat_ids:
+            self.send_message(c, 'ciao, mi spengo!')
