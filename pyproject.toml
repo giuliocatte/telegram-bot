@@ -1,7 +1,7 @@
 [project]
-name = "myapp"
-version = "0.1.0"
-description = "Add your description here"
+name = "telegram-agent"
+version = "1.0.0"
+description = "AI Agent with a telegram bot for I/O"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
