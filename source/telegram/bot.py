@@ -1,11 +1,7 @@
-import json
-import logging
 import time
 import traceback
-from collections import defaultdict
 from queue import Queue
 from threading import Thread
-from typing import Optional, Mapping
 
 import requests
 from requests import RequestException, Timeout
@@ -17,10 +13,9 @@ TELEGRAM_APIKEY = f['TELEGRAM_API_KEY']
 TELEGRAM_CHAT_IDS = f.get('TELEGRAM_CHAT_IDS', [])
 TELEGRAM_ENDPOINT = "https://api.telegram.org/bot"
 
-logger = logging.getLogger('TELEGRAM')
-
 
 class Api(object):
+
     def __init__(self, apikey=TELEGRAM_APIKEY, endpoint=TELEGRAM_ENDPOINT):
         self.apikey = apikey
         self.endpoint = endpoint
@@ -35,7 +30,7 @@ class Api(object):
             try:
                 resp = self.call_telegram("getUpdates", timeout=timeout, offset=update_id, allowed_updates=allowed_updates)
             except Timeout:
-                logger.debug("Resetting request for long polling...")
+                print("Resetting request for long polling...")
             else:
                 if resp['ok']:
                     if resp['result']:
@@ -51,119 +46,89 @@ class Api(object):
                                     callback(cid, t)
                     first_call = False
                 else:
-                    logger.error("error in calling Telegram: %s", resp)
+                    print("error in calling Telegram: %s", resp)
             finally:
                 # give the server a little breath.
                 time.sleep(poll_frequence)
 
     def call_telegram(self, method: str, **kwargs):
-        url = "{}{}/{}".format(self.endpoint, self.apikey, method)
+        url = "{}{}/{}" .format(self.endpoint, self.apikey, method)
         try:
             resp = requests.post(url, kwargs)
         except RequestException as e:
-            logger.error('error in calling telegram:\n%s', traceback.format_exc())
+            print('error in calling telegram:\n%s', traceback.format_exc())
             return {'ok': False, 'uncaught_exception': e}
         return resp.json()
 
 
-class TelegramLogHandler(logging.Handler):
-
-    def __init__(self, logger_mask, level=logging.NOTSET, disable_notification: Optional[Mapping] = None):
-        '''
-            logger mask is a Mapping logger_name: logger_level
-            every log of logger_name with logger_level >= the one passed will be emitted as a telegram message
-        '''
-        super().__init__(level=level)
-        self.disable_notification = disable_notification or {}
-        self.logger_mask = logger_mask
-        self.api = Api()
-        self.log_queue = Queue()
-        if TELEGRAM_CHAT_IDS:
-  #          Thread(daemon=True, target=self.api.get_updates, args=(self.set_engine_activity,)).start()
-  #          Thread(daemon=True, target=self.send_log_messages).start()
-            pass
-
-    # def set_engine_activity(self, chat_id, text):
-    #     if not self.engine:
-    #         self.api.call_telegram('sendMessage', chat_id=chat_id, text='engine not configured!')
-    #     if text == 'EMERGENCY STOP ENGINE':
-    #         self.engine.activity = Activity.EMERGENCY_STOP
-    #         self.api.call_telegram('sendMessage', chat_id=chat_id, text='engine set to emergency stop')
-    #     elif text == 'PAUSE ENGINE':
-    #         self.engine.activity = Activity.PAUSE
-    #         self.api.call_telegram('sendMessage', chat_id=chat_id, text='engine set to pause')
-    #     elif text == 'RESTART ENGINE':
-    #         self.engine.activity = Activity.TRADE
-    #         self.api.call_telegram('sendMessage', chat_id=chat_id, text='engine set to trade')
-    #     else:
-    #         logger.error('unsupported command: %s', text)
-    #         self.api.call_telegram('sendMessage', chat_id=chat_id, text='unsupported command!')
-
-    def filter(self, record):
-        try:
-            v = self.logger_mask[record.name]
-        except KeyError:
-            return False
-        return record.levelno >= v
-
-    def emit(self, record):
-        if TELEGRAM_CHAT_IDS:
-            # avoid to memory leak if no recipient is defined
-            self.log_queue.put_nowait(record)
-
-    def send_log_messages(self):
-        sentinel = object()
-        while True:
-            messages = []
-            notification = False
-            self.log_queue.put(sentinel)
-            for el in iter(self.log_queue.get_nowait, sentinel):
-                messages.append(el.getMessage())
-                if not self.disable_notification.get(el.name, False):
-                    notification = True
-            if messages:
-                text = messages if len(messages) == 1 else '\n'.join(
-                    '<b>{}.</b> {}'.format(i + 1, m) for i, m in enumerate(messages))
-                for user in TELEGRAM_CHAT_IDS:
-                    self.api.call_telegram('sendMessage',
-                                           chat_id=user,
-                                           text=text,
-                                           parse_mode='HTML',
-                                           disable_notification=not notification
-                    )
-            time.sleep(5)
-
-
 class TelegramRunner(object):
 
-    def __init__(self, chat_ids):
+    def __init__(self, chat_ids, session_service, app_name):
         self.api = Api()
-        self.chat_ids = chat_ids
+        self.session_service = session_service
+        self.chat_ids = set(chat_ids)
+        self.sessions = {}
+        self.app_name = app_name
         self.inbound_queue = {c:Queue() for c in chat_ids}
         Thread(daemon=True, target=self.api.get_updates, args=(self.receive_message,)).start()
+
+    @classmethod
+    async def create(cls, chat_ids, session_service, app_name):
+        self = cls(chat_ids, session_service, app_name)
+        for c in self.chat_ids:
+            self.sessions[c] = await session_service.create_session(
+                app_name=app_name,
+                user_id='chat_{}'.format(c)
+            )
+        return self
 
     def send_message(self, chat_id, text):
         self.api.call_telegram('sendMessage', chat_id=chat_id, text=text)
 
     def receive_message(self, chat_id, text):
-        self.inbound_queue[chat_id].put_nowait(text)
+        if chat_id in self.chat_ids:
+            self.inbound_queue[chat_id].put_nowait(text)
+        else:
+            self.send_message(chat_id, 'chat id not connected: {}'.format(chat_id))
 
-    def get_messages(self):
+    async def get_messages(self):
         sentinel = object()
         while True:
+            if not self.chat_ids:
+                break
+            to_disconnect = []
             for chat_id in self.chat_ids:
                 self.inbound_queue[chat_id].put(sentinel)
                 messages = []
                 for el in iter(self.inbound_queue[chat_id].get_nowait, sentinel):
-                    messages.append(el)
-                if messages:
-                    yield (chat_id, '\n'.join(messages))
+                    print('processing element', el)
+                    if el.startswith('/ask'):
+                        parts = el.split(' ', 1)
+                        if len(parts) > 1:
+                            messages.append(parts[1])
+                    elif el.startswith('/stop'):    
+                        to_disconnect.append(chat_id)
+                    elif el.startswith('/restart'):
+                        self.sessions[chat_id] = await self.session_service.create_session(
+                            app_name=self.app_name,
+                            user_id='chat_{}'.format(chat_id)
+                        )
+                        print('restarted')
+                    else:
+                        messages.append(el)  # chat diretta
+                    if messages:
+                        yield (chat_id, self.sessions[chat_id], '\n'.join(messages))
+            for c in to_disconnect:
+                self.disconnect(c)
             time.sleep(1)
 
     def connect(self):
         for c in self.chat_ids:
             self.send_message(c, 'ehilà, mi sono connesso!')
 
-    def disconnect(self):
-        for c in self.chat_ids:
+    def disconnect(self, chat_id=None):
+        print('richiesta di disconnessione per il chat_id', chat_id)
+        chat_ids = [chat_id] if chat_id else list(self.chat_ids)
+        for c in chat_ids:
             self.send_message(c, 'ciao, mi spengo!')
+            self.chat_ids.discard(c)

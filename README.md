@@ -10,3 +10,8 @@ The server then should be activated running:
 ```
 python main.py
 ```
+
+## TODO
+- Sostituire le print con dei log sensati
+- Capire come mai c'è un fiume di warning che arrivano dall'mcp
+- Gestire I/O multimodale
