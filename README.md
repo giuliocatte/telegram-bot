@@ -5,6 +5,12 @@ Uses gemini flash 2.5 as llm, and right now it has just a toolset of D&D 5e know
 
 ## Setup
 The telegram bot has to be created as explained in the bot_creation.py file.
+
+The bot should have these commands:
+* /ask - to ask anything to the agent
+* /restart - to restart the session (thus forgetting chat history)
+* /stop - to shutdown the agent activity for that specific chat; if it's the last one the server will shut down completely.
+
 The server then should be activated running:
 
 ```
